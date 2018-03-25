@@ -7,7 +7,9 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"runtime"
 	"runtime/pprof"
+	"sync"
 	"time"
 )
 
@@ -26,10 +28,10 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	const flips int = 100000
-	const iter int = 10000
-	const batch int = 10000
-	cltCalc := false
+	const flips int = 10000000
+	const batch int = 100000
+	cltCalc := true
+	fmt.Printf("Cores used: %d\n", runtime.NumCPU())
 	if cltCalc {
 		const binWidth float64 = 0.00000005
 		const left float64 = 0.0
@@ -40,13 +42,13 @@ func main() {
 
 		const samples int = 10000
 		for i := 0; i < samples; i++ {
-			total, _ := flipCustomRand(iter, flips, batch)
-			result := float64(total) / float64(iter*flips)
+			total, _ := flipCustomRand(flips, batch)
+			result := float64(total) / float64(flips)
 			binIdx := int(result / binWidth)
 			frequency[binIdx]++
 		}
 
-		f, _ := os.Create("frequency1.txt")
+		f, _ := os.Create("frequency10000000.txt")
 		defer f.Close()
 
 		writer := bufio.NewWriter(f)
@@ -55,70 +57,61 @@ func main() {
 		}
 		writer.Flush()
 	} else {
-		total, timeTaken := flipCustomRand(iter, flips, batch)
-		fmt.Printf("Final outcome: %d out of %d\n", total, iter*flips)
+		total, timeTaken := flipCustomRandWg(flips, batch)
+		fmt.Printf("Final outcome: %d out of %d\n", total, flips)
 		fmt.Printf("Time taken: %v", timeTaken)
 	}
 }
 
-func flip(iter, flips, batch int) (int, time.Duration) {
+func flipCustomRand(flips, batch int) (int, time.Duration) {
 	c := make(chan int)
 	total := 0
 	start := time.Now()
-	for it := 0; it < iter; it++ {
-		rand.Seed(start.UnixNano() + int64(it))
-		for i := 0; i < flips; i++ {
-			if i%batch == 0 {
-				go func() {
-					result := 0
-					for j := 0; j < batch; j++ {
-						p := rand.Float64()
-						if p >= 0.5 {
-							result++
-						}
-					}
-					c <- result
-				}()
+	for i := 0; i < flips; i += batch {
+		go func(k int) {
+			r := rand.New(rand.NewSource(start.UnixNano() + int64(k)))
+			result := 0
+			for j := 0; j < batch; j++ {
+				p := r.Float64()
+				if p >= 0.5 {
+					result++
+				}
 			}
-		}
-		count := 0
-		for i := 0; i < flips/batch; i++ {
-			result := <-c
-			count += result
-		}
-		total += count
+			c <- result
+		}(i)
 	}
+	count := 0
+	for i := 0; i < flips/batch; i++ {
+		result := <-c
+		count += result
+	}
+	total += count
 	end := time.Now()
 	diff := end.Sub(start)
 	return total, diff
 }
 
-func flipCustomRand(iter, flips, batch int) (int, time.Duration) {
-	c := make(chan int)
+func flipCustomRandWg(flips, batch int) (int, time.Duration) {
 	total := 0
+	result := make([]int, flips/batch)
+	var wg sync.WaitGroup
 	start := time.Now()
-	for it := 0; it < iter; it++ {
-		for i := 0; i < flips; i++ {
-			if i%batch == 0 {
-				go func() {
-					r := rand.New(rand.NewSource(start.UnixNano() + int64(it+i)))
-					result := 0
-					for j := 0; j < batch; j++ {
-						p := r.Float64()
-						if p >= 0.5 {
-							result++
-						}
-					}
-					c <- result
-				}()
+	for i := 0; i < flips; i += batch {
+		wg.Add(1)
+		go func(k int) {
+			defer wg.Done()
+			r := rand.New(rand.NewSource(start.UnixNano() + int64(k)))
+			for j := 0; j < batch; j++ {
+				p := r.Float64()
+				if p >= 0.5 {
+					result[k/batch]++
+				}
 			}
-		}
-		count := 0
-		for i := 0; i < flips/batch; i++ {
-			result := <-c
-			count += result
-		}
-		total += count
+		}(i)
+	}
+	wg.Wait()
+	for i := 0; i < flips/batch; i++ {
+		total += result[i/batch]
 	}
 	end := time.Now()
 	diff := end.Sub(start)

@@ -25,28 +25,19 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	const iter int = 10000000
+	const iter int = 1000000000
 	total := 0
 	start := time.Now()
 	var result int
-	streak := 0
+	r := rand.New(rand.NewSource(start.UnixNano()))
 	for it := 0; it < iter; it++ {
-		rand.Seed(start.UnixNano() + int64(it))
-		p := rand.Float64()
+		p := r.Float64()
 		if p >= 0.5 {
 			result = 1
 		} else {
 			result = 0
 		}
 		total += result
-		if result > 0 {
-			streak++
-		} else {
-			if streak >= 30 {
-				fmt.Printf("Found streak with length %d\n", streak)
-			}
-			streak = 0
-		}
 	}
 	end := time.Now()
 	diff := end.Sub(start)
